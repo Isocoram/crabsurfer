@@ -89,16 +89,27 @@ int compare_strings_strict(const char *s1, const char *s2) {
   return 1;
 }
 
+void dump_block_data(llblock_t *block) {
+  char format[] = "Buffer Content: \n%s\n"
+                  "Previous Ptr: \n%p\n"
+                  "Next Ptr: \n%p\n"
+                  "Index: \n%ld\n";
+  printf(format, block->buffer, block->previous, block->next, block->index);
+  return;
+}
+
 void serve(int socket_fd) {
   llblock_t *head = create_block();
   read(0, head->buffer, sizeof(head->buffer));
   printf("-> To Client: %s\n", get_current_time());
   fflush(stdout);
-  if (compare_strings_strict(head->buffer, "killy")) {
+  if (compare_strings_strict(head->buffer, "--kill")) {
     free(head);
     exit(0);
   }
-  if ()
+  if (compare_strings_strict(head->buffer, "--debug")) {
+    dump_block_data(head);
+  }
   ssize_t send_status = send(socket_fd, head->buffer, sizeof(head->buffer), MSG_DONTWAIT);
   if (send_status == FAILED) {
     free(head);

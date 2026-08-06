@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <stdbool.h>
 
 #define PAGESIZE 4096
 
@@ -97,6 +98,7 @@ void serve(int socket_fd) {
     free(head);
     exit(0);
   }
+  if ()
   ssize_t send_status = send(socket_fd, head->buffer, sizeof(head->buffer), MSG_DONTWAIT);
   if (send_status == FAILED) {
     free(head);

@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O0
+CFLAGS = -O0 -Wall -Wextra -Werror
 
 crabsurfer: crabsurfer.c 
 	$(CC) $(CFLAGS) crabsurfer.c -o crabsurfer

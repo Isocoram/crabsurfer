@@ -12,8 +12,6 @@
 
 #define PAGESIZE 4096
 
-static size_t BUFFERSIZE = 4096;
-
 typedef struct llblock {
   char buffer[PAGESIZE];
   struct llblock *previous;
@@ -21,11 +19,11 @@ typedef struct llblock {
   size_t index;
 } llblock_t;
 
-enum status { FAILED = -1, LISTEN_QUEUE_SIZE = 1 };
+enum status { SUCCESS = 0, FAILED = -1, LISTEN_QUEUE_SIZE = 1 };
 
 
-void inline static initialize_block(llblock_t *block) {
-  for (size_t i = 0; i < BUFFERSIZE; i++) {
+inline static void initialize_block(llblock_t *block) {
+  for (size_t i = 0; i < PAGESIZE; i++) {
     block->buffer[i] = '\0';
   }
   block->previous = NULL;
@@ -36,6 +34,30 @@ void inline static initialize_block(llblock_t *block) {
 llblock_t *create_block(void) {
   llblock_t *block = (llblock_t *)malloc(sizeof(llblock_t));
   initialize_block(block);
+  return block;
+}
+
+llblock_t *append_block(llblock_t *head, llblock_t *block) {
+  llblock_t *tail = head;
+  while (tail->next) {
+    tail = tail->next;
+  }
+  tail->next = block;
+  block->previous = tail;
+  tail = block;
+  tail->index = tail->previous->index + 1;
+  return tail;
+}
+
+llblock_t *prepend_block(llblock_t *head, llblock_t *block) {
+  block->previous = NULL;
+  block->next = head;
+  block->index = 0;
+  llblock_t *temp = block;
+  while (temp->next != NULL) {
+    temp->next->index = temp->index + 1;
+    temp = temp->next;
+  }
   return block;
 }
 
@@ -67,17 +89,17 @@ int compare_strings_strict(const char *s1, const char *s2) {
 }
 
 void serve(int socket_fd) {
-  char buffer[BUFFERSIZE];
-  memflood_char(buffer, sizeof(buffer), '\0');
-  read(0, buffer, sizeof(buffer));
+  llblock_t *head = create_block();
+  read(0, head->buffer, sizeof(head->buffer));
   printf("-> To Client: %s\n", get_current_time());
   fflush(stdout);
-  if (compare_strings_strict(buffer, "killy")) {
-    memflood_char(buffer, sizeof(buffer), '\0');
+  if (compare_strings_strict(head->buffer, "killy")) {
+    free(head);
     exit(0);
   }
-  ssize_t send_status = send(socket_fd, buffer, sizeof(buffer), MSG_CONFIRM);
+  ssize_t send_status = send(socket_fd, head->buffer, sizeof(head->buffer), MSG_DONTWAIT);
   if (send_status == FAILED) {
+    free(head);
     return;
   }
 }
@@ -97,22 +119,21 @@ void client_session(const char *ip, uint16_t port) {
   int connection = connect(sock, (struct sockaddr *)&socketinfo, sizeof(socketinfo));
   if (connection == FAILED) return;
   else {
-    char stream_data[BUFFERSIZE];
+    char stream_data[PAGESIZE];
     while (1) {
       ssize_t receive_status = recv(sock, stream_data, sizeof(stream_data), 0);
       if (receive_status == FAILED) {
         return;
       };
       printf("%s-> By Server: %s\n", stream_data, get_current_time());
-      goto stop;
+      goto out;
     }
   }
-  stop:
   //char character = get_single_char();
   //if (character != 's') goto next_iteration;
-  goto next_iteration;
-
+  out:
   close(sock);
+  goto next_iteration;
   return;
 }
 
@@ -126,7 +147,9 @@ void server_session(uint16_t port) {
   server_socketinfo.sin_port = htons(port);
   server_socketinfo.sin_addr.s_addr = INADDR_ANY;
 
+  bind_to_socket:
   int server_bind_status = bind(server_sock, (struct sockaddr *)&server_socketinfo, sizeof(server_socketinfo));
+  if (server_bind_status == FAILED) goto bind_to_socket;
 
   int listen_status = listen(server_sock, LISTEN_QUEUE_SIZE);
   if (listen_status == FAILED) goto cleanup;
@@ -142,16 +165,17 @@ void server_session(uint16_t port) {
 
   cleanup:
   int closing_status = close(server_sock);
+  if (closing_status != SUCCESS) return;
   return;
 }
 
 
 // use inet_pton() to make string to network address
 int main(int argc, char **argv) {
-  bool terminal_request, server_mode = false;
+  bool terminal_request = false, server_mode = false;
   int flag;
-  char *server_ip, *destination_ip, *port, *file_path, *byte_count;
-  server_ip = destination_ip = port = file_path = NULL;
+  char *destination_ip, *port, *file_path, *byte_count;
+  destination_ip = port = file_path = NULL;
 
   const char *help =
     "Usage:\n"
@@ -194,8 +218,7 @@ int main(int argc, char **argv) {
       case 'b':
         byte_count = strdup(optarg);
         size_t new_byte_count = strtoul(byte_count, NULL, 10);
-        BUFFERSIZE = new_byte_count;
-        printf("Byte Count: %s\n", byte_count);
+        printf("Byte Count: %ld\n", new_byte_count);
         break;
       default:
         printf("Not valid input.\n");
@@ -219,7 +242,7 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    if ((server_mode || destination_ip) || port) {
+    if ((server_mode || destination_ip) && (port != NULL)) {
       uint16_t port_number = (uint16_t)atoi(port);
       if (server_mode && port) {
         server_session(port_number);

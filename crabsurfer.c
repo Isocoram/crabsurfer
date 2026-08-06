@@ -8,24 +8,74 @@
 #include <stddef.h>         // for size_t
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 
-#define BUFFERSIZE 4096
+#define PAGESIZE 4096
+
+static size_t BUFFERSIZE = 4096;
+
+typedef struct llblock {
+  char buffer[PAGESIZE];
+  struct llblock *previous;
+  struct llblock *next;
+  size_t index;
+} llblock_t;
 
 enum status { FAILED = -1, LISTEN_QUEUE_SIZE = 1 };
 
+
+void inline static initialize_block(llblock_t *block) {
+  for (size_t i = 0; i < BUFFERSIZE; i++) {
+    block->buffer[i] = '\0';
+  }
+  block->previous = NULL;
+  block->next = NULL;
+  block->index = 0;
+}
+
+llblock_t *create_block(void) {
+  llblock_t *block = (llblock_t *)malloc(sizeof(llblock_t));
+  initialize_block(block);
+  return block;
+}
+
 char get_single_char(void) {
-  char buffer[10];
-  fgets(buffer, sizeof(buffer), stdin);
-  return buffer[0];
+  char text[1];
+  fgets(text, sizeof(text), stdin);
+  return text[0];
+}
+
+char *get_current_time(void) {
+  time_t time_ = time(NULL);
+  return ctime(&time_);
+}
+
+void memflood_char(char *buffer, size_t size, char character) {
+  for (size_t i = 0; i < size; i++) {
+    buffer[i] = character;
+  }
+  return;
+}
+
+int compare_strings_strict(const char *s1, const char *s2) {
+  while (*s1 != '\0' && *s2 != '\0') {
+    char character1 = *(s1++);
+    char character2 = *(s2++);
+    if (character1 != character2) return 0;
+  }
+  return 1;
 }
 
 void serve(int socket_fd) {
-  const char msg[] = "You've been served >:D\n";
   char buffer[BUFFERSIZE];
-  for (size_t i = 0; i < sizeof(buffer); i++) {
-    buffer[i] = (char)'\0';
-  }
+  memflood_char(buffer, sizeof(buffer), '\0');
   read(0, buffer, sizeof(buffer));
+  printf("-> To Client: %s\n", get_current_time());
+  fflush(stdout);
+  if (compare_strings_strict(buffer, "killy")) {
+    memflood_char(buffer, sizeof(buffer), '\0');
+    exit(0);
+  }
   ssize_t send_status = send(socket_fd, buffer, sizeof(buffer), MSG_CONFIRM);
   if (send_status == FAILED) {
     return;
@@ -38,7 +88,6 @@ void client_session(const char *ip, uint16_t port) {
   if (sock == FAILED) return;
 
   struct sockaddr_in socketinfo = {0};
-
   if (inet_pton(AF_INET, ip, &socketinfo.sin_addr) <= 0) {
     return;
   }
@@ -46,18 +95,15 @@ void client_session(const char *ip, uint16_t port) {
   socketinfo.sin_port = htons(port);
 
   int connection = connect(sock, (struct sockaddr *)&socketinfo, sizeof(socketinfo));
-
   if (connection == FAILED) return;
   else {
     char stream_data[BUFFERSIZE];
     while (1) {
-
       ssize_t receive_status = recv(sock, stream_data, sizeof(stream_data), 0);
       if (receive_status == FAILED) {
-        perror("Cant Receive");
         return;
       };
-      printf("server sent: %s", stream_data);
+      printf("%s-> By Server: %s\n", stream_data, get_current_time());
       goto stop;
     }
   }
@@ -71,11 +117,10 @@ void client_session(const char *ip, uint16_t port) {
 }
 
 void server_session(uint16_t port) {
-  printf("Server Started!");
   int server_sock = socket(AF_INET, SOCK_STREAM, 0);
   if (server_sock == FAILED) return;
 
-  struct sockaddr_in server_socketinfo = {0};
+  struct sockaddr_in server_socketinfo;
 
   server_socketinfo.sin_family = AF_INET;
   server_socketinfo.sin_port = htons(port);
@@ -105,25 +150,28 @@ void server_session(uint16_t port) {
 int main(int argc, char **argv) {
   bool terminal_request, server_mode = false;
   int flag;
-  char *server_ip, *destination_ip, *port, *file_path;
+  char *server_ip, *destination_ip, *port, *file_path, *byte_count;
   server_ip = destination_ip = port = file_path = NULL;
 
   const char *help =
     "Usage:\n"
     "Server  ./crabsurfer -s <port>\n"
-    "Client  ./crabsurfer -c <destination ip> -p <destination port>\n\n"
+    "Client  ./crabsurfer -c <destination ip> -p <destination port>\n"
+    "\nType 'killy' to end hosting the server.\n\n"
     "Flags:\n"
     "-h  help\n"
     "-s  specify server mode\n"
     "-c  specify client mode\n"
     "-p  specify port\n"
     "-t  terminal chat mode\n"
-    "-f  file chat mode\n";
+    "-f  file chat mode\n"
+    "-b  specify max byte count (standard 4096)\n";
 
-  while ((flag = getopt(argc, argv, "htf:sc:p:")) != -1) {
+  while ((flag = getopt(argc, argv, "htsbf:c:p:")) != -1) {
     switch (flag) {
       case 'h':
         printf("%s", help);
+        goto done;
         break;
       case 't':
         terminal_request = true;
@@ -133,15 +181,21 @@ int main(int argc, char **argv) {
         break;
       case 'c':
         destination_ip = strdup(optarg);
-        printf("Destination IP: %s\n", destination_ip);
+        //printf("Destination IP: %s\n", destination_ip);
         break;
       case 'p':
         port = strdup(optarg);
-        printf("Port: %s\n", port);
+        //printf("Port: %s\n", port);
         break;
       case 'f':
         file_path = strdup(optarg);
         printf("File Path: %s\n", file_path);
+        break;
+      case 'b':
+        byte_count = strdup(optarg);
+        size_t new_byte_count = strtoul(byte_count, NULL, 10);
+        BUFFERSIZE = new_byte_count;
+        printf("Byte Count: %s\n", byte_count);
         break;
       default:
         printf("Not valid input.\n");
@@ -172,8 +226,8 @@ int main(int argc, char **argv) {
       }
 
       if (destination_ip && port) {
-        //printf("Press [s] to stop!\n");
-        fflush(stdout);
+        //printf("Press [s] to stop! %s\n", get_current_time());
+        //fflush(stdout);
         client_session(destination_ip, port_number);
         goto done;
       }
